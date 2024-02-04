@@ -1,51 +1,55 @@
-from concurrent.futures import ThreadPoolExecutor
-from socket import AF_INET
-
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from socket import AF_INET, SOCK_STREAM, socket
 import argparse
 import colorama
-import socket
+import ipaddress
 import time
 
-def scan_port(port, target_IP):
+def scan_port(port, target_ip, result_list):
     """
     Scans a single port on a target IP address.
     """
     try:
-        s = socket.socket(AF_INET, socket.SOCK_STREAM)
-        conn = s.connect_ex((target_IP, port))
-        s.settimeout(1)
+        with socket(AF_INET, SOCK_STREAM) as s:
+            s.settimeout(0.5)  # Adjust the timeout value as needed
+            conn = s.connect_ex((target_ip, port))
 
-        if conn == 0:
-            open_ports.append(port)
-            print(f'Port {port}: Open')
-            
-        else:
-            print(f'Port {port}: Closed')
-            
-    except Exception as e:
+            if conn == 0:
+                result_list.append((port, "Open"))
+                print(f'Port {port}: Open')
+            else:
+                result_list.append((port, "Closed"))
+                print(f'Port {port}: Closed')
+
+    except OSError as e:
         print(f'Error checking port {port}: {str(e)}')
-        
-    finally:
-        s.close()
 
-def main(target_IP, port_range):
+def main(target_ip, port_range):
     """
     Main function to start the port scanning process.
     """
-    global open_ports
-    open_ports = []
+    result_list = []
     start_time = time.time()
-    
-    time.sleep(1)   
-    print(f"{colorama.Fore.GREEN}[-]{colorama.Fore.RESET} " + f"Starting scan on {target_IP} \n")
-    
-    with ThreadPoolExecutor(max_workers=100) as executor: 
-        for port in range(port_range[0], port_range[1] + 1):
-            executor.submit(scan_port, port, target_IP)
-            
+
+    try:
+        target_ip_obj = ipaddress.ip_address(target_ip)
+    except ValueError as e:
+        print(f'Invalid IP address: {str(e)}')
+        return
+
+    time.sleep(1)
+    print(f"{colorama.Fore.GREEN}[-]{colorama.Fore.RESET} " + f"Starting scan on {target_ip} \n")
+
+    with ThreadPoolExecutor(max_workers=20) as executor:
+        futures = [executor.submit(scan_port, port, target_ip, result_list) for port in range(port_range[0], port_range[1] + 1)]
+
+        for future in as_completed(futures):
+            pass 
+
     print(f'\nTime: {format(time.time() - start_time, ".2f")}')
     
-    if open_ports:
+    if result_list:
+        open_ports = [port for port, status in result_list if status == "Open"]
         print('Open ports:', ', '.join(map(str, open_ports)))
     else:
         print('No open ports found.')
@@ -53,8 +57,8 @@ def main(target_IP, port_range):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Port scanning on an IP address.')
     
-    parser.add_argument('target_IP', help='Target IP address')
+    parser.add_argument('target_ip', help='Target IP address')
     parser.add_argument('port_range', nargs=2, type=int, help='Port range to check')
     
     args = parser.parse_args()
-    main(args.target_IP, args.port_range)
+    main(args.target_ip, args.port_range)
